@@ -2,6 +2,7 @@ use clap::Arg;
 use clap::ArgAction;
 use clap::Command;
 use serde_yaml::Value;
+use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -19,6 +20,7 @@ macro_rules! fail {
 struct Config {
     require_null: bool,
     replacements: Vec<(String, String)>,
+    env_substitutions: Vec<String>,
     input: Option<PathBuf>,
     output: Option<PathBuf>,
     exec: Option<PathBuf>,
@@ -43,6 +45,17 @@ fn config() -> Config {
                 .help("Set the value at the specified path")
                 .action(ArgAction::Append)
                 .num_args(2),
+            Arg::new("env-substitutions")
+                .long("env-subst")
+                .value_name("VAR")
+                .help("Repace <VAR> placeholder with its environment variable value")
+                .long_help(
+                    "Repace the placeholder with the name of <VAR> with the
+corresponding environment variable value.
+The env substitutions happen after the path replacements.",
+                )
+                .action(ArgAction::Append)
+                .num_args(1),
             Arg::new("input")
                 .long("input")
                 .value_name("FILE")
@@ -90,6 +103,11 @@ fn config() -> Config {
     let mut config = Config {
         require_null: matches.get_flag("require-null"),
         replacements,
+        env_substitutions: matches
+            .get_many::<String>("env-substitutions")
+            .unwrap_or_default()
+            .map(Clone::clone)
+            .collect(),
         output: matches.get_one::<PathBuf>("output").map(Clone::clone),
         input: matches.get_one::<PathBuf>("input").map(Clone::clone),
         exec: None,
@@ -132,6 +150,8 @@ fn main() {
         update_value(&mut yaml, path, value, config.require_null);
     }
 
+    substitute_env(&mut yaml, &config.env_substitutions);
+
     let modified_yaml = serde_yaml::to_string(&yaml).expect("Failed to serialize YAML");
     if let Some(path) = config.output {
         let mut file = OpenOptions::new()
@@ -152,6 +172,35 @@ fn main() {
             .spawn()
             .unwrap_or_else(|e| fail!("Failed to spawn the process:\ncmd=`{cmd:?}`\nerror=`{e}`"));
         handle.wait().ok();
+    }
+}
+
+fn substitute_env(obj: &mut Value, vars: &[String]) {
+    let vars: HashMap<String, String> = vars
+        .iter()
+        .map(|v| (format!("{{{{{}}}}}", v), v.clone()))
+        .collect();
+    do_substitute_env(obj, &vars)
+}
+
+fn do_substitute_env(obj: &mut Value, vars: &HashMap<String, String>) {
+    if let Some(map) = obj.as_mapping_mut() {
+        for (_, obj) in map.iter_mut() {
+            do_substitute_env(obj, vars);
+        }
+    } else if let Some(seq) = obj.as_sequence_mut() {
+        for obj in seq.iter_mut() {
+            do_substitute_env(obj, vars);
+        }
+    } else if let Some(s) = obj.as_str() {
+        if let Some(var) = vars.get(s) {
+            let new_value = std::env::var(var).unwrap_or_else(|e| {
+                fail!("Failed to read the referred env variable `{var}`\nerror=`{e}`")
+            });
+            *obj = serde_yaml::from_str(&new_value).unwrap_or_else(|e| {
+                fail!("New value is no a valid YAML:\n  new_value=`{new_value}`\n  env_var=`{var}`\n  error=`{e}`")
+            });
+        }
     }
 }
 
