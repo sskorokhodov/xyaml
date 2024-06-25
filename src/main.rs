@@ -24,6 +24,7 @@ struct Config {
     input: Option<PathBuf>,
     output: Option<PathBuf>,
     exec: Option<PathBuf>,
+    subst_args_from_env: bool,
     exec_args: Vec<String>,
 }
 
@@ -85,14 +86,18 @@ fn config() -> Config {
                 .num_args(1),
         ])
         .subcommand(
-            Command::new("exec").arg(
+            Command::new("exec").args([
+                Arg::new("subst-args-with-env")
+                    .long("subst-args-with-env")
+                    .help(wrap_help("Substitue the arguments with the corresponding environment variable values."))
+                    .num_args(0),
                 Arg::new("cmd")
                     .value_name("cmd")
                     .action(ArgAction::Append)
                     .help("The executable and its arguments")
                     .trailing_var_arg(true)
-                    .num_args(1..),
-            ),
+                    .num_args(0..),
+            ]),
         )
         .get_matches();
 
@@ -126,6 +131,7 @@ fn config() -> Config {
         output: matches.get_one::<PathBuf>("output").map(Clone::clone),
         input: matches.get_one::<PathBuf>("input").map(Clone::clone),
         exec: None,
+        subst_args_from_env: false,
         exec_args: vec![],
     };
     if let Some(matches) = matches.subcommand_matches("exec") {
@@ -135,9 +141,35 @@ fn config() -> Config {
             .map(Clone::clone)
             .collect();
         config.exec = Some(PathBuf::from(&cmd[0]));
-        config.exec_args = cmd.into_iter().skip(1).collect();
+        config.subst_args_from_env = matches.get_flag("subst-args-with-env");
+        let mut exec_args: Vec<String> = cmd.into_iter().skip(1).collect();
+        if config.subst_args_from_env {
+            exec_args = substitute_exec_args(&exec_args);
+        }
+        config.exec_args = exec_args;
     }
     config
+}
+
+fn substitute_exec_args(args: &[String]) -> Vec<String> {
+    let mut result = vec![];
+    for a in args.iter() {
+        let val = if a.starts_with("{{") && a.ends_with("}}") {
+            let var = a[2..a.len() - 2].to_string();
+            std::env::var(&var)
+                .unwrap_or_else(|e| {
+                    fail!(
+                        "exec: Failed to read the referred env variable `{}`\nerror=`{e}`",
+                        var
+                    )
+                })
+                .to_string()
+        } else {
+            a.clone()
+        };
+        result.push(val);
+    }
+    result
 }
 
 fn main() {
