@@ -27,6 +27,25 @@ struct Config {
     exec_args: Vec<String>,
 }
 
+fn wrap_at(s: &str, at: usize) -> String {
+    let words = s.split(&[' ', '\t']).filter(|l| !l.is_empty());
+    let mut wrapped = vec![];
+    let mut line = String::new();
+    for w in words {
+        if !line.is_empty() && line.len() + w.len() >= at {
+            wrapped.push(line);
+            line = "".into()
+        }
+        line = line + w + " ";
+    }
+    wrapped.push(line);
+    wrapped.join("\n")
+}
+
+fn wrap_help(s: &str) -> String {
+    wrap_at(s, 70)
+}
+
 fn config() -> Config {
     let matches = Command::new("xyaml - YAML configuration transformer")
         .author("SUPREMATIC Technology Arts GmbH")
@@ -49,11 +68,7 @@ fn config() -> Config {
                 .long("env-subst")
                 .value_name("VAR")
                 .help("Repace <VAR> placeholder with its environment variable value")
-                .long_help(
-                    "Repace the placeholder with the name of <VAR> with the
-corresponding environment variable value.
-The env substitutions happen after the path replacements.",
-                )
+                .long_help(wrap_help("Repace the placeholder with the name of <VAR> with the corresponding environment variable value. The env substitutions happen after the path replacements."))
                 .action(ArgAction::Append)
                 .num_args(1),
             Arg::new("input")
