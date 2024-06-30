@@ -245,7 +245,7 @@ fn do_substitute_env(obj: &mut Value, vars: &HashMap<String, String>) {
                 fail!("Failed to read the referred env variable `{var}`\nerror=`{e}`")
             });
             *obj = serde_yaml::from_str(&new_value).unwrap_or_else(|e| {
-                fail!("New value is no a valid YAML:\n  new_value=`{new_value}`\n  env_var=`{var}`\n  error=`{e}`")
+                fail!("New value is not a valid YAML:\n  new_value=`{new_value}`\n  env_var=`{var}`\n  error=`{e}`")
             });
         }
     }
